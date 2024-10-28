@@ -69,7 +69,7 @@ jobs:
     - name: Go Build
       if: ${{ github.actor != 'nektos/act' }}
       run: |
-        CGO_ENABLED=0 GOPRIVATE=github.com/middleware-labs, github.com/middleware-labs/innoParser GOOS=linux GOARCH=${{ matrix.arch }} go build -ldflags="-s -w -X main.agentVersion=${RELEASE_VERSION}" -v -a -o $BINARY_SOURCE cmd/host-agent/main.go
+        CGO_ENABLED=0 GOPRIVATE=github.com/middleware-labs,github.com/middleware-labs/innoParser GOOS=linux GOARCH=${{ matrix.arch }} go build -ldflags="-s -w -X main.agentVersion=${RELEASE_VERSION}" -v -a -o $BINARY_SOURCE cmd/host-agent/main.go
         
     - name: Copying code binary into target location
       run: |
