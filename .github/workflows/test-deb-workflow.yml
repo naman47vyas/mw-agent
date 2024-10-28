@@ -35,8 +35,6 @@ jobs:
     - name: Checkout Repo
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GHCR_TOKEN }}
-        ssh-key: ${{ secrets.CHECK_AGENT_ACCESS }}
         submodules: 'recursive'
 
     - name: Set Architecture Variables
