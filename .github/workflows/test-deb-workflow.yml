@@ -55,21 +55,30 @@ jobs:
 
     - name: Set up Git credentials for Go
       run: |
+        # Remove any existing git config for github.com
+        git config --global --unset-all url."https://github.com/".insteadOf || true
+        # Set up new config with token
         git config --global url."https://${{ secrets.GHCR_TOKEN }}@github.com/".insteadOf "https://github.com/"
+        # Set GOPRIVATE
         go env -w GOPRIVATE=github.com/middleware-labs,github.com/middleware-labs/innoParser
+        # Debug: show git config (make sure to not print the actual token)
+        echo "Git config set up completed"
+        git config --global --get-regexp url.*.insteadOf
       env:
+        GIT_TERMINAL_PROMPT: 0
         GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN }}
 
     - name: Go Build
       if: ${{ github.actor != 'nektos/act' }}
       env:
+        GIT_TERMINAL_PROMPT: 0
         GOPRIVATE: github.com/middleware-labs,github.com/middleware-labs/innoParser
       run: |
-        # Verify git config
-        git config --global --get-regexp url
-        # Build
-        CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build -ldflags="-s -w -X main.agentVersion=${RELEASE_VERSION}" -v -a -o $BINARY_SOURCE cmd/host-agent/main.go        
-   
+        # Try a test clone first to verify credentials
+        git ls-remote https://github.com/middleware-labs/innoParser.git || echo "Failed to access repo"
+        # Then proceed with build
+        CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build -ldflags="-s -w -X main.agentVersion=${RELEASE_VERSION}" -v -a -o $BINARY_SOURCE cmd/host-agent/main.go
+    
     - name: Copying code binary into target location
       run: |
           if [ ${{ github.actor }} == "nektos/act" ]
