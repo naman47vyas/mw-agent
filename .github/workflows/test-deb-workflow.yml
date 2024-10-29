@@ -189,7 +189,7 @@ jobs:
   upload-to-release:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    # Remove the tag-only condition to allow it to run with workflow_dispatch too
     
     steps:
     - name: Download all artifacts
@@ -206,21 +206,30 @@ jobs:
         && sudo apt update \
         && sudo apt install gh -y
 
-    - name: Get Release Tag
-      id: get_tag
-      run: |
-        if [ -n "${{ github.event.inputs.release_version }}" ]; then
-          echo "RELEASE_TAG=${{ github.event.inputs.release_version }}" >> $GITHUB_ENV
-        else
-          echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-        fi
-
-    - name: Upload Assets to Release
+    - name: Create and upload to release
       env:
         GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN }}
       run: |
+        VERSION="${{ github.event.inputs.release_version }}"
+        if [ -z "$VERSION" ]; then
+          VERSION="${GITHUB_REF#refs/tags/}"
+        fi
+        
+        # Create release if it doesn't exist
+        gh release create "$VERSION" --notes "Release $VERSION" --title "Release $VERSION" || true
+        
+        # Debug info
+        echo "Artifacts directory content:"
+        ls -R ./artifacts
+        
         # For each architecture
         for arch in arm64 amd64; do
-          # Upload DEB package
-          gh release upload "$RELEASE_TAG" "./artifacts/mw-agent-${arch}-deb/mw-agent_${RELEASE_TAG}_${arch}.deb" --clobber
+          echo "Processing $arch architecture"
+          FILE="./artifacts/mw-agent-${arch}-deb/mw-agent_${VERSION}_${arch}.deb"
+          if [ -f "$FILE" ]; then
+            echo "Uploading $FILE to release $VERSION"
+            gh release upload "$VERSION" "$FILE" --clobber
+          else
+            echo "Warning: $FILE not found"
+          fi
         done
