@@ -115,18 +115,33 @@ jobs:
         --define="arch ${{ matrix.arch }}" \
         --define="package_name ${PACKAGE_NAME}" \
         --target=${{ matrix.arch }} ~/build/rpmbuild/SPECS/$SPEC_FILE
-
+    
     - name: Debug file location
       run: |
         echo "Checking file existence:"
-        ls -l ~/build/rpmbuild/RPMS/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}-${RELEASE_NUMBER}.${{ matrix.arch }}.rpm
+        echo "Expected path: ~/build/rpmbuild/RPMS/${{ matrix.arch }}/mw-agent-${RELEASE_VERSION}-${RELEASE_NUMBER}.${{ matrix.arch }}.rpm"
+        ls -la ~/build/rpmbuild/RPMS/${{ matrix.arch }}/
+        echo "Searching for any RPM files:"
+        find ~/build/rpmbuild/RPMS -name "*.rpm"
 
     - name: Upload RPM as artifact
       uses: actions/upload-artifact@v3
       with:
         name: mw-agent-${{ matrix.arch }}-rpm
-        path: ~/build/rpmbuild/RPMS/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}-${RELEASE_NUMBER}.${{ matrix.arch }}.rpm
+        path: |
+          ~/build/rpmbuild/RPMS/${{ matrix.arch }}/mw-agent-${{ env.RELEASE_VERSION }}-${{ env.RELEASE_NUMBER }}.${{ matrix.arch }}.rpm
         retention-days: 1
+    # - name: Debug file location
+    #   run: |
+    #     echo "Checking file existence:"
+    #     ls -l ~/build/rpmbuild/RPMS/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}-${RELEASE_NUMBER}.${{ matrix.arch }}.rpm
+
+    # - name: Upload RPM as artifact
+    #   uses: actions/upload-artifact@v3
+    #   with:
+    #     name: mw-agent-${{ matrix.arch }}-rpm
+    #     path: ~/build/rpmbuild/RPMS/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}-${RELEASE_NUMBER}.${{ matrix.arch }}.rpm
+    #     retention-days: 1
 
   upload-to-release:
     needs: build
