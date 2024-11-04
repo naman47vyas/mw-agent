@@ -54,18 +54,18 @@ jobs:
         GOOS=windows CGO_ENABLED=0 GOPRIVATE=github.com/middleware-labs go build -ldflags "-s -w -X main.agentVersion=${{ env.RELEASE_VERSION }}" -o build/mw-windows-agent.exe cmd/host-agent/main.go
         makensis -DVERSION=${{ env.RELEASE_VERSION }} package-tooling/windows/package-windows.nsi
        
-    - name: Install jsign Tool For Microsoft Authenticode
-      run: |
-        wget https://github.com/ebourg/jsign/releases/download/5.0/jsign_5.0_all.deb
-        sudo dpkg -i jsign_5.0_all.deb
+    # - name: Install jsign Tool For Microsoft Authenticode
+    #   run: |
+    #     wget https://github.com/ebourg/jsign/releases/download/5.0/jsign_5.0_all.deb
+    #     sudo dpkg -i jsign_5.0_all.deb
        
-    - name: Setup Code Signing Certificate
-      run: | 
-        echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > certificate_pkcs12.p12
+    # - name: Setup Code Signing Certificate
+    #   run: | 
+    #     echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > certificate_pkcs12.p12
 
-    - name: Sign MW Agent Installer Package
-      run: |
-        jsign --storetype ${{ secrets.SM_CLIENT_CERT_STORE_TYPE }} --alias ${{ secrets.SM_CLIENT_CERT_ALIAS }} --tsaurl ${{ secrets.SM_TIMESTAMP_AUTHORITY_URL }} --storepass "${{ secrets.SM_API_KEY }}|./certificate_pkcs12.p12|${{ secrets.SM_CLIENT_CERT_PASSWORD }}"  package-tooling/windows/mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
+    # - name: Sign MW Agent Installer Package
+    #   run: |
+    #     jsign --storetype ${{ secrets.SM_CLIENT_CERT_STORE_TYPE }} --alias ${{ secrets.SM_CLIENT_CERT_ALIAS }} --tsaurl ${{ secrets.SM_TIMESTAMP_AUTHORITY_URL }} --storepass "${{ secrets.SM_API_KEY }}|./certificate_pkcs12.p12|${{ secrets.SM_CLIENT_CERT_PASSWORD }}"  package-tooling/windows/mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
              
     - name: Upload Artifact
       uses: actions/upload-artifact@v3
