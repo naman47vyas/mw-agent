@@ -70,8 +70,9 @@ jobs:
     - name: Upload Artifact
       uses: actions/upload-artifact@v3
       with:
-        name: mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
+        name: windows-installer
         path: package-tooling/windows/mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
+        retention-days: 1
 
   upload-to-release:
     needs: create_installer
@@ -81,6 +82,7 @@ jobs:
     - name: Download artifacts
       uses: actions/download-artifact@v3
       with:
+        name: windows-installer
         path: ./artifacts
 
     - name: Set up GitHub CLI
@@ -107,7 +109,7 @@ jobs:
         ls -R ./artifacts
         
         # Upload Windows installer
-        FILE="./artifacts/windows-installer/mw-windows-agent-${VERSION}-setup.exe"
+        FILE="./artifacts/mw-windows-agent-${VERSION}-setup.exe"
         if [ -f "$FILE" ]; then
           echo "Uploading $FILE to release $VERSION"
           gh release upload "$VERSION" "$FILE" --clobber --repo ${{ github.repository }}
@@ -115,4 +117,10 @@ jobs:
           echo "Warning: $FILE not found"
           echo "Checking actual file path:"
           find ./artifacts -type f -name "*.exe"
+          # Try uploading with found path
+          FOUND_FILE=$(find ./artifacts -type f -name "*.exe" | head -n 1)
+          if [ ! -z "$FOUND_FILE" ]; then
+            echo "Found file at $FOUND_FILE, attempting upload"
+            gh release upload "$VERSION" "$FOUND_FILE" --clobber --repo ${{ github.repository }}
+          fi
         fi
