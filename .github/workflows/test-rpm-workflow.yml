@@ -39,8 +39,6 @@ jobs:
     - name: Checkout Repo
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GHCR_TOKEN }}
-        ssh-key: ${{ secrets.CHECK_AGENT_ACCESS }}
         submodules: 'recursive'
         
     - name: Set Architecture Variables
@@ -53,6 +51,7 @@ jobs:
         echo "::set-env name=RELEASE_NUMBER::$(echo "${{ github.event.inputs.release_number || 1 }}" | tr -d '\n')"
         echo "::set-env name=PACKAGE_NAME::mw-agent"
         echo "::set-env name=SPEC_FILE::mw-agent.spec"
+
     - name: Creating Required Folder Structure
       run: |
         mkdir -p ~/build/rpmbuild/BUILD
@@ -70,20 +69,22 @@ jobs:
         ~/build/rpmbuild/SOURCES/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}/otel-config.yaml.sample
         cp package-tooling/linux/postinst ~/build/rpmbuild/SOURCES/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}/postinstall.sh
         cp package-tooling/linux/mw-agent.service ~/build/rpmbuild/SOURCES/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}/mw-agent.service
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: 1.22.1
-        cache: false
-    
+
     - name: Set up Git credentials for Go
       run: |
-        git config --global url."https://${{ secrets.GHCR_TOKEN }}:@github.com/".insteadOf "https://github.com/"
+        # Remove any existing git config for github.com
+        git config --global --unset-all url."https://github.com/".insteadOf || true
+        # Set up new config with token
+        git config --global url."https://${{ secrets.GHCR_TOKEN }}@github.com/".insteadOf "https://github.com/"
+        # Set GOPRIVATE
+        go env -w GOPRIVATE=github.com/middleware-labs,github.com/middleware-labs/innoParser
+        # Debug: show git config (make sure to not print the actual token)
+        echo "Git config set up completed"
+        git config --global --get-regexp url.*.insteadOf
       env:
+        GIT_TERMINAL_PROMPT: 0
         GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN }}
 
-    # Building with CGO_ENABLED=0 so that we can build static binary which is not dependent on any external libraries
-    # Building with -ldflags="-s -w" to reduce the size of binary
     - name: Go Build
       run: |
         buildarch="amd64"
@@ -94,7 +95,7 @@ jobs:
         
         if [ ${{ github.actor }} != "nektos/act" ]
         then
-          CGO_ENABLED=0 GOPRIVATE=github.com/middleware-labs GOOS=linux GOARCH=${buildarch} go build \
+          CGO_ENABLED=0 GOPRIVATE=github.com/middleware-labs,github.com/middleware-labs/innoParser GOOS=linux GOARCH=${buildarch} go build \
           -ldflags="-s -w -X main.agentVersion=${RELEASE_VERSION}" \
           -v -a -o ~/build/rpmbuild/SOURCES/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}/${PACKAGE_NAME} cmd/host-agent/main.go
         else
@@ -106,6 +107,7 @@ jobs:
         cd ~/build/rpmbuild/SOURCES/${{ matrix.arch }}
         tar czvf ~/build/rpmbuild/SOURCES/${PACKAGE_NAME}-${RELEASE_VERSION}-${{ matrix.arch }}.tar.gz \
         ${PACKAGE_NAME}-${RELEASE_VERSION}/
+
     - name: Create RPM package
       run: |
         rpmbuild -bb --define="release_version ${RELEASE_VERSION}" \
@@ -113,79 +115,67 @@ jobs:
         --define="arch ${{ matrix.arch }}" \
         --define="package_name ${PACKAGE_NAME}" \
         --target=${{ matrix.arch }} ~/build/rpmbuild/SPECS/$SPEC_FILE
-    - name: Acquire lock
-      if: ${{ github.actor != 'nektos/act' }}
-      run: flock upload.lock -c "echo Lock acquired"
 
-    # - name: Upload artifacts to Github Pages (yum.middleware.io)
-    #   if: ${{ github.actor != 'nektos/act' }}
-    #   run: |
-    #     git clone https://.:${{ secrets.GHCR_TOKEN }}@github.com/middleware-labs/yum.middleware.io.git    
-    #     cp -r ~/build/rpmbuild/RPMS/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}-${RELEASE_NUMBER}.${{ matrix.arch }}.rpm \
-    #     yum.middleware.io/${{ matrix.arch }}/Packages/
-       
-    #     cd yum.middleware.io
-    #     git config --global user.email "keval@middleware.io"
-    #     git config --global user.name "bhogayatakb"
-    #     git add .
-    #     git commit -m "RPM added to yum.middleware.io"
-    #     git fetch origin master
-    #     git merge origin/master
-    #     git push origin master
-    - name: Release lock
-      if: ${{ github.actor != 'nektos/act' }}
-      run: flock upload.lock -c "echo Lock released"
-    - name: Delay
-      if: ${{ github.actor != 'nektos/act' }}
-      run: sleep 10
-    
+    - name: Debug file location
+      run: |
+        echo "Checking file existence:"
+        ls -l ~/build/rpmbuild/RPMS/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}-${RELEASE_NUMBER}.${{ matrix.arch }}.rpm
+
+    - name: Upload RPM as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: mw-agent-${{ matrix.arch }}-rpm
+        path: ~/build/rpmbuild/RPMS/${{ matrix.arch }}/${PACKAGE_NAME}-${RELEASE_VERSION}-${RELEASE_NUMBER}.${{ matrix.arch }}.rpm
+        retention-days: 1
+
   upload-to-release:
-      needs: build
-      runs-on: ubuntu-latest
-      
-      steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v3
-        with:
-          path: ./artifacts
-  
-      - name: Set up GitHub CLI
-        run: |
-          type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-          && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-          && sudo apt update \
-          && sudo apt install gh -y
-  
-      - name: Create and upload to release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ github.event.inputs.release_version }}"
-          REL_NUM="${{ github.event.inputs.release_number }}"
-          if [ -z "$VERSION" ]; then
-            VERSION="${GITHUB_REF#refs/tags/}"
-          fi
-          if [ -z "$REL_NUM" ]; then
-            REL_NUM="1"
-          fi
-          
-          # Debug info
-          echo "Artifacts directory content:"
-          ls -R ./artifacts
-          
-          # For each architecture
-          for arch in x86_64 aarch64; do
-            echo "Processing $arch architecture"
-            FILE="./artifacts/mw-agent-${arch}-rpm/mw-agent-${VERSION}-${REL_NUM}.${arch}.rpm"
-            if [ -f "$FILE" ]; then
-              echo "Uploading $FILE to release $VERSION"
-              gh release upload "$VERSION" "$FILE" --clobber --repo ${{ github.repository }}
-            else
-              echo "Warning: $FILE not found"
-              echo "Checking actual file path:"
-              find ./artifacts -type f -name "*.rpm"
-            fi
-          done
+    needs: build
+    runs-on: ubuntu-latest
     
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: ./artifacts
+
+    - name: Set up GitHub CLI
+      run: |
+        type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+        && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+        && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+        && sudo apt update \
+        && sudo apt install gh -y
+
+    - name: Create and upload to release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERSION="${{ github.event.inputs.release_version }}"
+        REL_NUM="${{ github.event.inputs.release_number }}"
+        if [ -z "$VERSION" ]; then
+          VERSION="${GITHUB_REF#refs/tags/}"
+        fi
+        if [ -z "$REL_NUM" ]; then
+          REL_NUM="1"
+        fi
+        
+        # Debug info
+        echo "VERSION: $VERSION"
+        echo "REL_NUM: $REL_NUM"
+        echo "Artifacts directory content:"
+        ls -R ./artifacts
+        
+        # For each architecture
+        for arch in x86_64 aarch64; do
+          echo "Processing $arch architecture"
+          FILE="./artifacts/mw-agent-${arch}-rpm/${PACKAGE_NAME}-${VERSION}-${REL_NUM}.${arch}.rpm"
+          if [ -f "$FILE" ]; then
+            echo "Uploading $FILE to release $VERSION"
+            gh release upload "$VERSION" "$FILE" --clobber --repo ${{ github.repository }}
+          else
+            echo "Warning: $FILE not found"
+            echo "Checking actual file path:"
+            find ./artifacts -type f -name "*.rpm"
+          fi
+        done
