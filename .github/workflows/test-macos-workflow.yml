@@ -1,4 +1,4 @@
-name: Build and Notarize macOS Installer
+name: Build macOS Installer
 
 on:
   workflow_dispatch:
@@ -40,7 +40,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '^1.23.1' # The Go version to download (if necessary) and use.
+        go-version: '^1.23.1'
 
     - name: Setting Release Number
       run: |
@@ -56,40 +56,6 @@ jobs:
         bash package-tooling/darwin/create_installer.sh ${{ env.RELEASE_VERSION }}
       env:
         RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
-
-
-    # - name: Set up signing certificates
-    #   run: |
-    #     echo "$APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE" | base64 --decode > signing_certificate_application.p12
-    #     echo "$APPLE_DEVELOPER_ID_INSTALLER_CERTIFICATE" | base64 --decode > signing_certificate_installer.p12
-    #     security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_NAME
-    #     security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_NAME
-    #     security import signing_certificate_application.p12 -k $KEYCHAIN_NAME -P "$APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-    #     security import signing_certificate_installer.p12 -k $KEYCHAIN_NAME -P "$APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD" -T /usr/bin/productbuild
-    #     security list-keychains -s $KEYCHAIN_NAME
-    #     security set-keychain-settings -t 3600 -u $KEYCHAIN_NAME
-    #     security set-key-partition-list -S apple-tool:,apple: -s -k "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_NAME
-    #   env:
-    #     APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
-    #     APPLE_DEVELOPER_ID_INSTALLER_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_CERTIFICATE_BASE64 }}
-    #     APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-    #     APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
-    #     KEYCHAIN_NAME: "build.keychain"
-
-    # - name: Build and notarize installer
-    #   run: |
-    #     CGO_ENABLED=1 GOPRIVATE=github.com/middleware-labs GOOS=darwin GOARCH=${{ matrix.arch }} go build -ldflags="-s -w -X main.agentVersion=${RELEASE_VERSION}" -v -a -o build/mw-host-agent cmd/host-agent/main.go
-    #     bash package-tooling/darwin/create_installer.sh ${{ env.RELEASE_VERSION }}
-    #   env:
-        # APPLE_DEVELOPER_ID_APPLICATION: "Developer ID Application: Middleware Labs Inc (AV4NQ68UX8)"
-        # APPLE_DEVELOPER_ID_INSTALLER: "Developer ID Installer: Middleware Labs Inc (AV4NQ68UX8)"
-        # APPLE_ID: ${{ secrets.APPLE_ID }}
-        # APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-        # APPLE_DEVELOPER_TEAM_ID: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
-        # KEYCHAIN_PROFILE: "Middleware MacOS Agent"
-        # KEYCHAIN_NAME: "build.keychain"
-        # RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
-        # ARCH: ${{ matrix.arch }}
 
     - name: Upload installer package
       uses: actions/upload-artifact@v4
