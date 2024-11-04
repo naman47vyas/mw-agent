@@ -27,14 +27,18 @@ jobs:
     - name: Checkout Repo
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GHCR_TOKEN }}
-        ssh-key: ${{ secrets.CHECK_AGENT_ACCESS }}
         submodules: 'recursive'
 
     - name: Set up Git credentials
       run: |
-        git config --global url."https://${{ secrets.GHCR_TOKEN }}:@github.com/".insteadOf "https://github.com/"
+        # Remove any existing git config for github.com
+        git config --global --unset-all url."https://github.com/".insteadOf || true
+        # Set up new config with token
+        git config --global url."https://${{ secrets.GHCR_TOKEN }}@github.com/".insteadOf "https://github.com/"
+        # Set GOPRIVATE
+        go env -w GOPRIVATE=github.com/middleware-labs,github.com/middleware-labs/innoParser
       env:
+        GIT_TERMINAL_PROMPT: 0
         GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN }}
     
     - name: Set up Go
@@ -52,17 +56,28 @@ jobs:
 
     - name: Build installer
       run: |
-        CGO_ENABLED=1 GOPRIVATE=github.com/middleware-labs GOOS=darwin GOARCH=${{ matrix.arch }} go build -ldflags="-s -w -X main.agentVersion=${RELEASE_VERSION}" -v -a -o build/mw-host-agent cmd/host-agent/main.go
+        CGO_ENABLED=1 GOPRIVATE=github.com/middleware-labs,github.com/middleware-labs/innoParser GOOS=darwin GOARCH=${{ matrix.arch }} go build -ldflags="-s -w -X main.agentVersion=${RELEASE_VERSION}" -v -a -o build/mw-host-agent cmd/host-agent/main.go
         bash package-tooling/darwin/create_installer.sh ${{ env.RELEASE_VERSION }}
       env:
         RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+        ARCH: ${{ matrix.arch }}
+
+    - name: Debug build directory
+      run: |
+        echo "Contents of build directory:"
+        ls -R build/
+        echo "Contents of package-tooling/darwin directory:"
+        ls -R package-tooling/darwin/
 
     - name: Upload installer package
       uses: actions/upload-artifact@v4
       with:
-        name: mw-macos-agent-setup-${{ matrix.arch }}.pkg
-        path: build/mw-macos-agent-setup-${{ matrix.arch }}.pkg
-  
+        name: macos-installer-${{ matrix.arch }}
+        path: |
+          build/*.pkg
+          package-tooling/darwin/*.pkg
+        retention-days: 1
+
   upload-to-release:
     needs: build
     runs-on: ubuntu-latest
@@ -99,19 +114,14 @@ jobs:
         # For each architecture
         for arch in arm64 amd64; do
           echo "Processing $arch architecture"
-          FILE="./artifacts/macos-installer-${arch}/mw-macos-agent-setup-${arch}.pkg"
-          if [ -f "$FILE" ]; then
-            echo "Uploading $FILE to release $VERSION"
-            gh release upload "$VERSION" "$FILE" --clobber --repo ${{ github.repository }}
+          # Try to find the pkg file for this architecture
+          FOUND_FILE=$(find ./artifacts -type f -name "*.pkg" | grep "${arch}" | head -n 1)
+          if [ ! -z "$FOUND_FILE" ]; then
+            echo "Found file at $FOUND_FILE, uploading to release"
+            gh release upload "$VERSION" "$FOUND_FILE" --clobber --repo ${{ github.repository }}
           else
-            echo "Warning: $FILE not found"
-            echo "Checking actual file path:"
-            find ./artifacts -type f -name "*.pkg"
-            # Try uploading with found path
-            FOUND_FILE=$(find ./artifacts -type f -name "*.pkg" | grep "${arch}" | head -n 1)
-            if [ ! -z "$FOUND_FILE" ]; then
-              echo "Found file at $FOUND_FILE, attempting upload"
-              gh release upload "$VERSION" "$FOUND_FILE" --clobber --repo ${{ github.repository }}
-            fi
+            echo "Warning: No pkg file found for $arch architecture"
+            echo "Available files:"
+            find ./artifacts -type f
           fi
         done
