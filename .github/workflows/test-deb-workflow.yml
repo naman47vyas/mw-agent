@@ -35,6 +35,8 @@ jobs:
     - name: Checkout Repo
       uses: actions/checkout@v4
       with:
+        token: ${{ secrets.GHCR_TOKEN }}
+        ssh-key: ${{ secrets.CHECK_AGENT_ACCESS }}
         submodules: 'recursive'
 
     - name: Set Architecture Variables
@@ -52,32 +54,26 @@ jobs:
       run: |
         mkdir -p build/apt-repo
         mkdir -p build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/opt/${PACKAGE_NAME}/bin
+
+    - name: Set up Go
+      if: ${{ github.actor != 'nektos/act' }}
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.22.1
+
     - name: Set up Git credentials for Go
       run: |
-        # Remove any existing git config for github.com
-        git config --global --unset-all url."https://github.com/".insteadOf || true
-        # Set up new config with token
-        git config --global url."https://${{ secrets.GHCR_TOKEN }}@github.com/".insteadOf "https://github.com/"
-        # Set GOPRIVATE
-        go env -w GOPRIVATE=github.com/middleware-labs,github.com/middleware-labs/innoParser
-        # Debug: show git config (make sure to not print the actual token)
-        echo "Git config set up completed"
-        git config --global --get-regexp url.*.insteadOf
+        git config --global url."https://${{ secrets.GHCR_TOKEN }}:@github.com/".insteadOf "https://github.com/"
       env:
-        GIT_TERMINAL_PROMPT: 0
         GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN }}
 
+    # Building with CGO_ENABLED=0 so that we can build static binary which is not dependent on any external libraries
+    # Building with -ldflags="-s -w" to reduce the size of binary
     - name: Go Build
       if: ${{ github.actor != 'nektos/act' }}
-      env:
-        GIT_TERMINAL_PROMPT: 0
-        GOPRIVATE: github.com/middleware-labs,github.com/middleware-labs/innoParser
       run: |
-        # Try a test clone first to verify credentials
-        git ls-remote https://github.com/middleware-labs/innoParser.git || echo "Failed to access repo"
-        # Then proceed with build
-        CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build -ldflags="-s -w -X main.agentVersion=${RELEASE_VERSION}" -v -a -o $BINARY_SOURCE cmd/host-agent/main.go
-    
+        CGO_ENABLED=0 GOPRIVATE=github.com/middleware-labs GOOS=linux GOARCH=${{ matrix.arch }} go build -ldflags="-s -w -X main.agentVersion=${RELEASE_VERSION}" -v -a -o $BINARY_SOURCE cmd/host-agent/main.go
+        
     - name: Copying code binary into target location
       run: |
           if [ ${{ github.actor }} == "nektos/act" ]
@@ -86,37 +82,40 @@ jobs:
           else 
             cp $BINARY_SOURCE build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/opt/${PACKAGE_NAME}/bin/${PACKAGE_NAME}
           fi
+
     - name: Copy Linux root files & generate dpkg Control file
       run: |
           mkdir -p build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/DEBIAN
           mkdir -p build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/etc/${PACKAGE_NAME}
           mkdir -p build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/lib/systemd/system
+
           cp package-tooling/agent-config.yaml.sample build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/etc/${PACKAGE_NAME}/agent-config.yaml.sample
           cp package-tooling/otel-config.yaml.sample build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/etc/${PACKAGE_NAME}/otel-config.yaml.sample
+
           cp package-tooling/linux/postinst build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/DEBIAN/postinst
           cp package-tooling/linux/prerm build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/DEBIAN/prerm
           cp package-tooling/linux/postrm build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/DEBIAN/postrm
           chmod 0755 build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/DEBIAN/postinst
           chmod 0755 build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/DEBIAN/prerm
           chmod 0755 build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/DEBIAN/postrm
+
           cp package-tooling/linux/mw-agent.service build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/lib/systemd/system/mw-agent.service
+
           PACKAGE=${PACKAGE_NAME} VERSION=${RELEASE_VERSION} ARCHITECTURE=${{ matrix.arch }} envsubst < package-tooling/linux/deb/control > build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}/DEBIAN/control
+
     - name: Creating DEB package
       run: |
           dpkg-deb --build -Z xz build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}
           dpkg-deb --info build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}.deb
           dpkg-deb --contents build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}.deb
-    - name: Debug file location
-      run: |
-        echo "Checking file existence:"
-        ls -l build/mw-agent_${{ env.RELEASE_VERSION }}_${{ matrix.arch }}.deb
+    
     - name: Upload DEB as artifact
       uses: actions/upload-artifact@v3
       with:
         name: mw-agent-${{ matrix.arch }}-deb
-        path: build/mw-agent_${{ env.RELEASE_VERSION }}_${{ matrix.arch }}.deb
+        path: build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}.deb
         retention-days: 1
-        
+
     # - name: Set up aptly
     #   if: ${{ github.actor != 'nektos/act' }}
     #   run: |
@@ -128,6 +127,7 @@ jobs:
     #     # Move aptly binary to a directory in PATH
     #     sudo mv aptly_1.5.0_linux_amd64/aptly /usr/local/bin/
 
+    
     # - name: Verify aptly version
     #   if: ${{ github.actor != 'nektos/act' }}
     #   run: aptly version
@@ -176,7 +176,11 @@ jobs:
     #     git add .
     #     git commit -m "apt.middleware.io updated"
     #     git push origin master
-    
+# distribution = stable, wheezy
+# architectures = all, amd64, arm64
+# component = main, contrib, non-free
+
+   
   upload-to-release:
     needs: build
     runs-on: ubuntu-latest
@@ -198,7 +202,6 @@ jobs:
 
     - name: Create and upload to release
       env:
-        # Use GITHUB_TOKEN instead of GHCR_TOKEN for your fork
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         VERSION="${{ github.event.inputs.release_version }}"
@@ -207,6 +210,7 @@ jobs:
         fi
         
         # Debug info
+        echo "VERSION: $VERSION"
         echo "Artifacts directory content:"
         ls -R ./artifacts
         
@@ -216,9 +220,15 @@ jobs:
           FILE="./artifacts/mw-agent-${arch}-deb/mw-agent_${VERSION}_${arch}.deb"
           if [ -f "$FILE" ]; then
             echo "Uploading $FILE to release $VERSION"
-            # Add --repo flag to specify your fork
             gh release upload "$VERSION" "$FILE" --clobber --repo ${{ github.repository }}
           else
             echo "Warning: $FILE not found"
+            echo "Checking actual file path:"
+            find ./artifacts -type f -name "*.deb"
+            FOUND_FILE=$(find ./artifacts -type f -name "*.deb" | grep "${arch}" | head -n 1)
+            if [ ! -z "$FOUND_FILE" ]; then
+              echo "Found file at $FOUND_FILE, attempting upload"
+              gh release upload "$VERSION" "$FOUND_FILE" --clobber --repo ${{ github.repository }}
+            fi
           fi
         done
