@@ -115,7 +115,13 @@ jobs:
         name: mw-agent-${{ matrix.arch }}-deb
         path: build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}.deb
         retention-days: 1
-
+    - name: Debug file location
+      run: |
+        echo "Looking for DEB file..."
+        ls -la build/
+        echo "Full path we're looking for:"
+        echo "build/${PACKAGE_NAME}_${RELEASE_VERSION}_${{ matrix.arch }}.deb"
+        find build/ -name "*.deb"
     # - name: Set up aptly
     #   if: ${{ github.actor != 'nektos/act' }}
     #   run: |
