@@ -64,7 +64,7 @@ jobs:
     - name: Build MW Agent for Windows
       env:
         GOPRIVATE: github.com/middleware-labs
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GHCR_TOEKN }}
       run: |
         GOOS=windows CGO_ENABLED=0 go build -ldflags "-s -w -X main.agentVersion=${{ env.RELEASE_VERSION }}" -o build/mw-windows-agent.exe cmd/host-agent/main.go
         makensis -DVERSION=${{ env.RELEASE_VERSION }} package-tooling/windows/package-windows.nsi 
