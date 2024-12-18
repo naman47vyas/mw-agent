@@ -27,9 +27,14 @@ jobs:
     - name: Checkout Repo
       uses: actions/checkout@v3
       with:
-        token: ${{ secrets.GHCR_TOKEN }}
-        ssh-key: ${{ secrets.CHECK_AGENT_ACCESS }}
+        token: ${{ secrets.GITHUB_TOKEN }}  # or keep GHCR_TOKEN if it has the necessary permissions
         submodules: 'recursive'
+    # - name: Checkout Repo
+    #   uses: actions/checkout@v3
+    #   with:
+    #     token: ${{ secrets.GHCR_TOKEN }}
+    #     ssh-key: ${{ secrets.CHECK_AGENT_ACCESS }}
+    #     submodules: 'recursive'
 
   #   - name: Install makensis
   #     run: sudo apt update && sudo apt install -y nsis nsis-pluginapi
