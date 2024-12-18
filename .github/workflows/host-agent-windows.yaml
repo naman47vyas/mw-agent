@@ -64,7 +64,7 @@ jobs:
     - name: Build MW Agent for Windows
       env:
         GOPRIVATE: github.com/middleware-labs
-        GH_TOKEN: ${{ secrets.GHCR_TOEKN }}
+        GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
       run: |
         GOOS=windows CGO_ENABLED=0 go build -ldflags "-s -w -X main.agentVersion=${{ env.RELEASE_VERSION }}" -o build/mw-windows-agent.exe cmd/host-agent/main.go
         makensis -DVERSION=${{ env.RELEASE_VERSION }} package-tooling/windows/package-windows.nsi 
@@ -92,10 +92,15 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    # - name: Download artifacts
+    #   uses: actions/download-artifact@v3
+    #   with:
+    #     name: windows-installer
+    #     path: ./artifacts
     - name: Download artifacts
       uses: actions/download-artifact@v3
       with:
-        name: windows-installer
+        name: mw-windows-agent-${{ github.event.inputs.release_version }}-setup.exe
         path: ./artifacts
 
     - name: Set up GitHub CLI
