@@ -28,6 +28,7 @@ jobs:
       uses: actions/checkout@v3
       with:
         token: ${{ secrets.GITHUB_TOKEN }}  # or keep GHCR_TOKEN if it has the necessary permissions
+        ssh-key: ${{ secrets.CHECK_AGENT_ACCESS }}
         submodules: 'recursive'
     # - name: Checkout Repo
     #   uses: actions/checkout@v3
