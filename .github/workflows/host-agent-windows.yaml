@@ -100,6 +100,10 @@ jobs:
     #   with:
     #     name: windows-installer
     #     path: ./artifacts
+    - name: Checkout Repo  # Add this step
+      uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.GHCR_TOKEN }}
     - name: Set Version
       run: |
         if [ -n "${{ github.event.inputs.release_version }}" ]; then
