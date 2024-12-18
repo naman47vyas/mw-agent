@@ -95,11 +95,15 @@ jobs:
     if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')  # Only run for tag pushes
     
     steps:
-    - name: Download artifacts
+    - name: Download all artifacts
       uses: actions/download-artifact@v3
       with:
-        name: mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
         path: ./artifacts
+    # - name: Download artifacts
+    #   uses: actions/download-artifact@v3
+    #   with:
+    #     name: mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
+    #     path: ./artifacts
 
     - name: Set up GitHub CLI
       run: |
