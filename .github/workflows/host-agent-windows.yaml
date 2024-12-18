@@ -44,8 +44,10 @@ jobs:
     - name: Set up Git credentials for Go
       run: |
         git config --global url."https://${{ secrets.GHCR_TOKEN }}:@github.com/".insteadOf "https://github.com/"
+        # # Also configure GOPRIVATE to handle private repos
+        # echo "GOPRIVATE=github.com/middleware-labs" >> $GITHUB_ENV
       env:
-        GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Setting Release Number
       run: |
