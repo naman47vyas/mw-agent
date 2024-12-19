@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: 'Release number for MW Agent for Windows'
+        description: 'Release version for Windows package'
         required: true
   push:
     paths-ignore:
@@ -16,94 +16,89 @@ env:
   ACTIONS_ALLOW_UNSECURE_COMMANDS: true
 
 jobs:
-  create_installer:
-    runs-on: ${{ matrix.os }}
-
+  build:
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
-        os: [ 'ubuntu-22.04']
+        arch:
+          - amd64
+      max-parallel: 1
 
     steps:
     - name: Checkout Repo
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}  # or keep GHCR_TOKEN if it has the necessary permissions
+        token: ${{ secrets.GHCR_TOKEN }}
         ssh-key: ${{ secrets.CHECK_AGENT_ACCESS }}
         submodules: 'recursive'
-    # - name: Checkout Repo
-    #   uses: actions/checkout@v3
-    #   with:
-    #     token: ${{ secrets.GHCR_TOKEN }}
-    #     ssh-key: ${{ secrets.CHECK_AGENT_ACCESS }}
-    #     submodules: 'recursive'
 
     - name: Install makensis
       run: sudo apt update && sudo apt install -y nsis nsis-pluginapi
-      if: ${{ matrix.os == 'ubuntu-22.04' }}
-    
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.23.4
+
     - name: Set up Git credentials for Go
       run: |
         git config --global url."https://${{ secrets.GHCR_TOKEN }}:@github.com/".insteadOf "https://github.com/"
-        # # Also configure GOPRIVATE to handle private repos
-        # echo "GOPRIVATE=github.com/middleware-labs" >> $GITHUB_ENV
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Setting Release Number
+        GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN }}
+
+    - name: Setting Release Version
       run: |
         if [ -n "${{ github.event.inputs.release_version }}" ]; then
           echo "RELEASE_VERSION=${{ github.event.inputs.release_version }}" >> $GITHUB_ENV
         else
           echo "RELEASE_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
         fi
-        echo "Set RELEASE_VERSION to: $RELEASE_VERSION"  # Debug line
+        echo "Set RELEASE_VERSION to: $RELEASE_VERSION"
 
-    # - name: Build MW Agent for Windows
-    #   run: |
-    #     GOOS=windows CGO_ENABLED=0 GOPRIVATE=github.com/middleware-labs go build -ldflags "-s -w -X main.agentVersion=${{ env.RELEASE_VERSION }}" -o build/mw-windows-agent.exe cmd/host-agent/main.go
-    #     makensis -DVERSION=${{ env.RELEASE_VERSION }} package-tooling/windows/package-windows.nsi
+    - name: Create Build Directory
+      run: |
+        mkdir -p build
+        mkdir -p package-tooling/windows
+
     - name: Build MW Agent for Windows
       env:
         GOPRIVATE: github.com/middleware-labs
         GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
       run: |
         GOOS=windows CGO_ENABLED=0 go build -ldflags "-s -w -X main.agentVersion=${{ env.RELEASE_VERSION }}" -o build/mw-windows-agent.exe cmd/host-agent/main.go
-        makensis -DVERSION=${{ env.RELEASE_VERSION }} package-tooling/windows/package-windows.nsi 
-  #   - name: Install jsign Tool For Microsoft Authenticode
-  #     run: |
-  #       wget https://github.com/ebourg/jsign/releases/download/5.0/jsign_5.0_all.deb
-  #       sudo dpkg -i jsign_5.0_all.deb
-       
-  #   - name: Setup Code Signing Certificate
-  #     run: | 
-  #       echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > certificate_pkcs12.p12
+        makensis -DVERSION=${{ env.RELEASE_VERSION }} package-tooling/windows/package-windows.nsi
 
-  #   - name: Sign MW Agent Installer Package
-  #     run: |
-  #       jsign --storetype ${{ secrets.SM_CLIENT_CERT_STORE_TYPE }} --alias ${{ secrets.SM_CLIENT_CERT_ALIAS }} --tsaurl ${{ secrets.SM_TIMESTAMP_AUTHORITY_URL }} --storepass "${{ secrets.SM_API_KEY }}|./certificate_pkcs12.p12|${{ secrets.SM_CLIENT_CERT_PASSWORD }}"  package-tooling/windows/mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
-             
-    - name: Upload Artifact
+    # Commented signing section
+    #   - name: Install jsign Tool For Microsoft Authenticode
+    #     run: |
+    #       wget https://github.com/ebourg/jsign/releases/download/5.0/jsign_5.0_all.deb
+    #       sudo dpkg -i jsign_5.0_all.deb
+    #    
+    #   - name: Setup Code Signing Certificate
+    #     run: | 
+    #       echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > certificate_pkcs12.p12
+    #
+    #   - name: Sign MW Agent Installer Package
+    #     run: |
+    #       jsign --storetype ${{ secrets.SM_CLIENT_CERT_STORE_TYPE }} --alias ${{ secrets.SM_CLIENT_CERT_ALIAS }} --tsaurl ${{ secrets.SM_TIMESTAMP_AUTHORITY_URL }} --storepass "${{ secrets.SM_API_KEY }}|./certificate_pkcs12.p12|${{ secrets.SM_CLIENT_CERT_PASSWORD }}"  package-tooling/windows/mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
+
+    - name: Upload Installer as artifact
       uses: actions/upload-artifact@v3
       with:
-        name: mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
+        name: mw-windows-agent-${{ matrix.arch }}-setup
         path: package-tooling/windows/mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
-    
+        retention-days: 1
 
   upload-to-release:
-    needs: create_installer
+    needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')  # Only run for tag pushes
+    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     
     steps:
     - name: Download all artifacts
       uses: actions/download-artifact@v3
       with:
         path: ./artifacts
-    # - name: Download artifacts
-    #   uses: actions/download-artifact@v3
-    #   with:
-    #     name: mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
-    #     path: ./artifacts
 
     - name: Set up GitHub CLI
       run: |
@@ -114,150 +109,34 @@ jobs:
         && sudo apt update \
         && sudo apt install gh -y
 
-    - name: Upload to release
+    - name: Create and upload to release
       env:
-        GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN}}
+        GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN }}
       run: |
-        VERSION="${GITHUB_REF#refs/tags/}"
+        VERSION="${{ github.event.inputs.release_version }}"
+        if [ -z "$VERSION" ]; then
+          VERSION="${GITHUB_REF#refs/tags/}"
+        fi
         
         # Debug info
         echo "VERSION: $VERSION"
         echo "Artifacts directory content:"
         ls -R ./artifacts
         
-        FILE="./artifacts/mw-windows-agent-${VERSION}-setup.exe"
-        if [ -f "$FILE" ]; then
-          echo "Uploading $FILE to release $VERSION"
-          gh release upload "$VERSION" "$FILE" --clobber --repo ${{ github.repository }}
-        fi
-  # upload-to-release:
-  #   needs: create_installer
-  #   runs-on: ubuntu-latest
-    
-  #   steps:
-  #   # - name: Download artifacts
-  #   #   uses: actions/download-artifact@v3
-  #   #   with:
-  #   #     name: windows-installer
-  #   #     path: ./artifacts
-  #   - name: Checkout Repo  # Add this step
-  #     uses: actions/checkout@v3
-  #     with:
-  #       token: ${{ secrets.GHCR_TOKEN }}
-  #   - name: Set Version
-  #     run: |
-  #       if [ -n "${{ github.event.inputs.release_version }}" ]; then
-  #         RELEASE_VERSION="${{ github.event.inputs.release_version }}"
-  #         echo "Setting RELEASE_VERSION from github.event.inputs.release_version: ${{ github.event.inputs.release_version }}"
-  #       else
-  #         RELEASE_VERSION="${GITHUB_REF#refs/tags/}"
-  #         echo "Setting RELEASE_VERSION from GITHUB_REF#refs/tags/: ${GITHUB_REF#refs/tags/}"
-  #       fi
-  #       echo "RELEASE_VERSION=$RELEASE_VERSION" >> $GITHUB_ENV
-  #       echo "Set RELEASE_VERSION to: $RELEASE_VERSION"  # Debug line
-  #   - name: Download artifacts
-  #     uses: actions/download-artifact@v3
-  #     with:
-  #       name:  mw-windows-agent-${{ env.RELEASE_VERSION }}-setup.exe
-  #       path: ./artifacts
-
-  #   - name: Set up GitHub CLI
-  #     run: |
-  #       type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
-  #       curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-  #       && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-  #       && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-  #       && sudo apt update \
-  #       && sudo apt install gh -y
-
-  #   - name: Upload to release
-  #     env:
-  #       GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN}}
-  #     run: |
-  #       # Check if this is a tag-based release or manual run
-  #       if [ -n "${{ github.ref_type }}" ] && [ "${{ github.ref_type }}" == "tag" ]; then
-  #         VERSION="${GITHUB_REF#refs/tags/}"
-          
-  #         # Create/upload to release only for tag-based triggers
-  #         echo "Tag-based release detected. Creating/updating release for version: $VERSION"
-  #         gh release view "$VERSION" || gh release create "$VERSION" --title "Release $VERSION"
-          
-  #         FILE="./artifacts/mw-windows-agent-${VERSION}-setup.exe"
-  #         if [ -f "$FILE" ]; then
-  #           echo "Uploading $FILE to release $VERSION"
-  #           if gh release upload "$VERSION" "$FILE" --clobber; then
-  #             echo "Upload successful!"
-  #           else
-  #             echo "Upload failed!"
-  #             exit 1
-  #           fi
-  #         else
-  #           echo "Error: File $FILE not found"
-  #           exit 1
-  #         fi
-  #       else
-  #         echo "Manual workflow run detected. Skipping release creation/upload."
-  #         echo "Artifact is available in the workflow run's artifacts section."
-  #       fi
-    # - name: Upload to release
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN}}
-    #   run: |
-    #     VERSION="${{ github.event.inputs.release_version }}"
-    #     if [ -z "$VERSION" ]; then
-    #       VERSION="${GITHUB_REF#refs/tags/}"
-    #     fi
-        
-    #     # Debug info
-    #     echo "VERSION: $VERSION"
-    #     echo "Artifacts directory content:"
-    #     ls -R ./artifacts
-        
-    #     # Check if release exists, if not create it
-    #     echo "Checking/creating release..."
-    #     gh release view "$VERSION" || gh release create "$VERSION" --title "Release $VERSION"
-        
-    #     # Upload Windows installer with error checking
-    #     FILE="./artifacts/mw-windows-agent-${VERSION}-setup.exe"
-    #     if [ -f "$FILE" ]; then
-    #       echo "Uploading $FILE to release $VERSION"
-    #       if gh release upload "$VERSION" "$FILE" --clobber; then
-    #         echo "Upload successful!"
-    #       else
-    #         echo "Upload failed!"
-    #         exit 1
-    #       fi
-    #     else
-    #       echo "Error: File $FILE not found"
-    #       exit 1
-    #     fi
-    # - name: Upload to release
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN}}
-    #   run: |
-    #     VERSION="${{ github.event.inputs.release_version }}"
-    #     if [ -z "$VERSION" ]; then
-    #       VERSION="${GITHUB_REF#refs/tags/}"
-    #     fi
-        
-    #     # Debug info
-    #     echo "VERSION: $VERSION"
-    #     echo "Artifacts directory content:"
-    #     ls -R ./artifacts
-        
-    #     # Upload Windows installer
-    #     FILE="./artifacts/mw-windows-agent-${VERSION}-setup.exe"
-    #     if [ -f "$FILE" ]; then
-    #       echo "Uploading $FILE to release $VERSION"
-    #       gh release upload "$VERSION" "$FILE" --clobber --repo ${{ github.repository }}
-    #     else
-    #       echo "Warning: $FILE not found"
-    #       echo "Checking actual file path:"
-    #       find ./artifacts -type f -name "*.exe"
-    #       # Try uploading with found path
-    #       FOUND_FILE=$(find ./artifacts -type f -name "*.exe" | head -n 1)
-    #       if [ ! -z "$FOUND_FILE" ]; then
-    #         echo "Found file at $FOUND_FILE, attempting upload"
-    #         gh release upload "$VERSION" "$FOUND_FILE" --clobber --repo ${{ github.repository }}
-    #       fi
-    #     fi
+        for arch in amd64; do
+          echo "Processing $arch architecture"
+          FILE="./artifacts/mw-windows-agent-${arch}-setup/mw-windows-agent-${VERSION}-setup.exe"
+          if [ -f "$FILE" ]; then
+            echo "Uploading $FILE to release $VERSION"
+            gh release upload "$VERSION" "$FILE" --clobber --repo ${{ github.repository }}
+          else
+            echo "Warning: $FILE not found"
+            echo "Checking actual file path:"
+            find ./artifacts -type f -name "*.exe"
+            FOUND_FILE=$(find ./artifacts -type f -name "*.exe" | grep "${arch}" | head -n 1)
+            if [ ! -z "$FOUND_FILE" ]; then
+              echo "Found file at $FOUND_FILE, attempting upload"
+              gh release upload "$VERSION" "$FOUND_FILE" --clobber --repo ${{ github.repository }}
+            fi
+          fi
+        done
